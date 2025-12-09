@@ -7,7 +7,7 @@ app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "output_mp3"
-FFMPEG_PATH = "ffmpeg"
+FFMPEG_PATH = "ffmpeg"  # Σε Windows βάλτε πλήρη διαδρομή π.χ. r"C:\ffmpeg\bin\ffmpeg.exe"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -23,7 +23,7 @@ HTML = """
 <style>
 body { font-family: Arial; background:#f2f2f2; padding:30px }
 .box { background:white; padding:20px; max-width:600px; margin:auto; border-radius:10px }
-button { padding:10px 20px; font-size:16px }
+button { padding:10px 20px; font-size:16px; margin-top:5px; }
 select { width:100%; height:120px; margin-top:10px }
 .progress-bar { width:100%; background:#ddd; border-radius:10px; overflow:hidden; margin-top:10px }
 .progress-bar-fill { height:25px; width:0%; background:#4CAF50; text-align:center; color:white; }
@@ -35,6 +35,8 @@ select { width:100%; height:120px; margin-top:10px }
   <h2>M4A → MP3 Converter</h2>
 
   <input type="file" id="files" multiple accept=".m4a" onchange="updateList()"><br><br>
+
+  <p id="selectedCount">Επιλεγμένα αρχεία: 0</p>
 
   <select id="fileList" multiple></select><br>
   <button onclick="removeSelected()" id="removeBtn">Αφαίρεση επιλεγμένου</button><br><br>
@@ -66,6 +68,7 @@ function refreshList() {
         opt.text = f.name;
         list.appendChild(opt);
     });
+    document.getElementById("selectedCount").innerText = "Επιλεγμένα αρχεία: " + selectedFiles.length;
 }
 
 function removeSelected() {
@@ -78,7 +81,6 @@ function removeSelected() {
 function startUpload() {
     if (selectedFiles.length === 0) { alert("Επίλεξε αρχεία"); return; }
 
-    // Απενεργοποίηση κουμπιών
     document.getElementById("convertBtn").disabled = true;
     document.getElementById("removeBtn").disabled = true;
     document.getElementById("files").disabled = true;
@@ -111,8 +113,11 @@ function pollProgress() {
                 document.getElementById("removeBtn").disabled = false;
                 document.getElementById("files").disabled = false;
 
+                // Καθαρισμός λίστας και ένδειξης
                 selectedFiles = [];
                 refreshList();
+                document.getElementById("bar").style.width = "0%";
+                document.getElementById("bar").innerText = "0%";
             }
         });
 }
