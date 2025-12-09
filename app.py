@@ -2,6 +2,8 @@ from flask import Flask, render_template_string, request, send_from_directory, j
 import os
 import subprocess
 import uuid
+import threading
+import time
 
 app = Flask(__name__)
 
@@ -77,6 +79,8 @@ select { width:100%; height:120px; margin-top:10px }
 <script>
 let selectedFiles = [];
 let taskId = "";
+let fakeProgress = 0;
+let fakeInterval;
 
 function updateList() {
     selectedFiles = Array.from(document.getElementById("files").files);
@@ -115,6 +119,21 @@ function startUpload() {
     for (let f of selectedFiles) formData.append("files", f);
 
     fetch("/", { method: "POST", body: formData });
+
+    // Fake progress bar
+    fakeProgress = 0;
+    document.getElementById("bar").style.width = "0%";
+    document.getElementById("bar").innerText = "0%";
+
+    fakeInterval = setInterval(() => {
+        if(fakeProgress < 95){
+            fakeProgress += Math.random() * 5; // Τυχαία αύξηση
+            if(fakeProgress > 95) fakeProgress = 95;
+            document.getElementById("bar").style.width = fakeProgress + "%";
+            document.getElementById("bar").innerText = Math.floor(fakeProgress) + "%";
+        }
+    }, 300);
+
     pollProgress();
 }
 
@@ -122,13 +141,10 @@ function pollProgress() {
     fetch("/progress/" + taskId)
         .then(r => r.json())
         .then(data => {
-            let p = data.progress;
-            document.getElementById("bar").style.width = p + "%";
-            document.getElementById("bar").innerText = p + "%";
-
-            if (p < 100) {
-                setTimeout(pollProgress, 1000);
-            } else {
+            if(data.progress >= 100){
+                clearInterval(fakeInterval);
+                document.getElementById("bar").style.width = "100%";
+                document.getElementById("bar").innerText = "100%";
                 document.getElementById("results").innerHTML = data.links;
 
                 // Επαναενεργοποίηση κουμπιών
@@ -136,13 +152,10 @@ function pollProgress() {
                 document.getElementById("removeBtn").disabled = false;
                 document.getElementById("files").disabled = false;
 
-                // Καθαρισμός λίστας
                 selectedFiles = [];
                 refreshList();
-
-                // Reset progress bar
-                document.getElementById("bar").style.width = "0%";
-                document.getElementById("bar").innerText = "0%";
+            } else {
+                setTimeout(pollProgress, 500);
             }
         });
 }
@@ -152,39 +165,40 @@ function pollProgress() {
 </html>
 """
 
+def convert_files(files, task_id):
+    total = len(files)
+    links = ""
+    for i, file in enumerate(files):
+        input_path = os.path.join(UPLOAD_FOLDER, file.filename)
+        output_name = os.path.splitext(file.filename)[0] + ".mp3"
+        output_path = os.path.join(OUTPUT_FOLDER, output_name)
+
+        file.save(input_path)
+
+        command = [
+            FFMPEG_PATH, "-y",
+            "-i", input_path,
+            "-codec:a", "libmp3lame",
+            "-qscale:a", "2",
+            output_path
+        ]
+        subprocess.run(command)
+
+        progress_data[task_id] = int(((i + 1)/total)*100)
+        links += f'<p><a href="/download/{output_name}">{output_name}</a></p>'
+
+    progress_data[task_id] = 100
+    progress_data[task_id + "_links"] = links
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
         files = request.files.getlist("files")
         task_id = request.form.get("taskId")
-
-        total = len(files)
         progress_data[task_id] = 0
-        links = ""
 
-        for i, file in enumerate(files):
-            input_path = os.path.join(UPLOAD_FOLDER, file.filename)
-            output_name = os.path.splitext(file.filename)[0] + ".mp3"
-            output_path = os.path.join(OUTPUT_FOLDER, output_name)
-
-            file.save(input_path)
-
-            command = [
-                FFMPEG_PATH, "-y",
-                "-i", input_path,
-                "-codec:a", "libmp3lame",
-                "-qscale:a", "2",
-                output_path
-            ]
-            subprocess.run(command)
-
-            percent = int(((i + 1) / total) * 100)
-            progress_data[task_id] = percent
-
-            links += f'<p><a href="/download/{output_name}">{output_name}</a></p>'
-
-        progress_data[task_id] = 100
-        progress_data[task_id + "_links"] = links
+        # Εκτέλεση μετατροπής σε thread
+        threading.Thread(target=convert_files, args=(files, task_id)).start()
 
     return render_template_string(HTML)
 
