@@ -23,10 +23,33 @@ HTML = """
 <style>
 body { font-family: Arial; background:#f2f2f2; padding:30px }
 .box { background:white; padding:20px; max-width:600px; margin:auto; border-radius:10px }
-button { padding:10px 20px; font-size:16px; margin-top:5px; }
+button { padding:10px 20px; font-size:16px; margin-top:5px; cursor:pointer; }
 select { width:100%; height:120px; margin-top:10px }
 .progress-bar { width:100%; background:#ddd; border-radius:10px; overflow:hidden; margin-top:10px }
 .progress-bar-fill { height:25px; width:0%; background:#4CAF50; text-align:center; color:white; }
+
+.file-input-wrapper {
+    position: relative;
+    overflow: hidden;
+    display: inline-block;
+}
+
+.file-input-wrapper button {
+    border: 1px solid #ccc;
+    color: white;
+    background-color: #4CAF50;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.file-input-wrapper input[type=file] {
+    font-size: 100px;
+    position: absolute;
+    left: 0;
+    top: 0;
+    opacity: 0;
+}
 </style>
 </head>
 <body>
@@ -34,7 +57,10 @@ select { width:100%; height:120px; margin-top:10px }
 <div class="box">
   <h2>M4A → MP3 Converter</h2>
 
-  <input type="file" id="files" multiple accept=".m4a" onchange="updateList()"><br><br>
+  <div class="file-input-wrapper">
+      <button>Επιλογή Αρχείων</button>
+      <input type="file" id="files" multiple accept=".m4a" onchange="updateList()">
+  </div><br><br>
 
   <select id="fileList" multiple></select><br>
   <button onclick="removeSelected()" id="removeBtn">Αφαίρεση επιλεγμένου</button><br><br>
