@@ -2,8 +2,8 @@ from flask import Flask, render_template_string, request, send_from_directory, j
 import os
 import subprocess
 import threading
-import time
 import uuid
+import re
 
 app = Flask(__name__)
 
@@ -28,7 +28,7 @@ HTML = """
     button { padding:8px 16px; margin-top:5px; }
     select { width:100%; height:150px }
     .progress-bar { width:100%; background:#ddd; border-radius:10px; overflow:hidden; margin-top:10px }
-    .progress-bar-fill { height:25px; width:0%; background:#4CAF50; text-align:center; color:white; transition: width 0.4s; }
+    .progress-bar-fill { height:25px; width:0%; background:#4CAF50; text-align:center; color:white; transition: width 0.25s; }
   </style>
 </head>
 <body>
@@ -36,14 +36,13 @@ HTML = """
 <div class="box">
   <h2>M4A → MP3 Converter</h2>
 
-  <input type="file" id="files" multiple accept=".m4a"><br><br>
-  <button onclick="addFiles()">Προσθήκη στη λίστα</button>
+  <input type="file" id="files" multiple accept=".m4a" onchange="updateList()"><br><br>
 
   <h4>Λίστα αρχείων</h4>
   <select id="fileList" multiple></select><br>
-  <button onclick="removeSelected()">Αφαίρεση επιλεγμένου</button><br><br>
+  <button onclick="removeSelected()" id="removeBtn">Αφαίρεση επιλεγμένου</button><br><br>
 
-  <button onclick="startConvert()">Μετατροπή</button>
+  <button onclick="startConvert()" id="convertBtn">Μετατροπή</button>
 
   <div class="progress-bar">
     <div class="progress-bar-fill" id="bar">0%</div>
@@ -56,11 +55,8 @@ HTML = """
 let selectedFiles = [];
 let taskId = "";
 
-function addFiles() {
-  let input = document.getElementById("files");
-  for (let f of input.files) {
-    selectedFiles.push(f);
-  }
+function updateList() {
+  selectedFiles = Array.from(document.getElementById("files").files);
   refreshList();
 }
 
@@ -85,6 +81,11 @@ function removeSelected() {
 function startConvert() {
   if (selectedFiles.length === 0) return alert("Δεν υπάρχουν αρχεία!");
 
+  // Απενεργοποίηση κουμπιών
+  document.getElementById("convertBtn").disabled = true;
+  document.getElementById("removeBtn").disabled = true;
+  document.getElementById("files").disabled = true;
+
   taskId = crypto.randomUUID();
   let formData = new FormData();
   formData.append("taskId", taskId);
@@ -106,9 +107,15 @@ function pollProgress() {
       document.getElementById("bar").innerText = p + "%";
 
       if (p < 100) {
-        setTimeout(pollProgress, 500);
+        setTimeout(pollProgress, 300);
       } else {
         document.getElementById("results").innerHTML = data.links;
+
+        // Επαναενεργοποίηση κουμπιών
+        document.getElementById("convertBtn").disabled = false;
+        document.getElementById("removeBtn").disabled = false;
+        document.getElementById("files").disabled = false;
+
         selectedFiles = [];
         refreshList();
       }
@@ -120,16 +127,27 @@ function pollProgress() {
 </html>
 """
 
-def convert_files(files, task_id):
-    total = len(files)
-    links = ""
+def get_duration(path):
+    cmd = [
+        "ffprobe", "-v", "error", "-show_entries",
+        "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
+        path
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return float(result.stdout.strip())
 
-    for i, file in enumerate(files):
+def convert_files(files, task_id):
+    total_files = len(files)
+    links_html = ""
+
+    for index, file in enumerate(files):
         input_path = os.path.join(UPLOAD_FOLDER, file.filename)
         output_name = os.path.splitext(file.filename)[0] + ".mp3"
         output_path = os.path.join(OUTPUT_FOLDER, output_name)
 
         file.save(input_path)
+
+        duration = get_duration(input_path)
 
         command = [
             FFMPEG_PATH, "-y",
@@ -139,18 +157,30 @@ def convert_files(files, task_id):
             output_path
         ]
 
-        subprocess.run(command)
+        process = subprocess.Popen(command, stderr=subprocess.PIPE, text=True)
 
-        # Fake smooth progress (για ομαλή μπάρα)
-        for step in range(5):
-            current = int(((i + (step+1)/5) / total) * 100)
-            progress_data[task_id] = current
-            time.sleep(0.2)
+        time_pattern = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
 
-        links += f'<p><a href="/download/{output_name}">{output_name}</a></p>'
+        while True:
+            line = process.stderr.readline()
+            if not line:
+                break
+
+            match = time_pattern.search(line)
+            if match:
+                h, m, s = match.groups()
+                current_time = int(h)*3600 + int(m)*60 + float(s)
+                percent_file = min(current_time / duration, 1.0)
+
+                overall = int(((index + percent_file) / total_files) * 100)
+                progress_data[task_id] = overall
+
+        process.wait()
+
+        links_html += f'<p><a href="/download/{output_name}">{output_name}</a></p>'
 
     progress_data[task_id] = 100
-    progress_data[task_id + "_links"] = links
+    progress_data[task_id + "_links"] = links_html
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -173,3 +203,6 @@ def progress(task_id):
 @app.route("/download/<filename>")
 def download(filename):
     return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True)
+
+if __name__ == "__main__":
+    app.run(debug=True)
