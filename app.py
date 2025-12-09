@@ -36,8 +36,6 @@ select { width:100%; height:120px; margin-top:10px }
 
   <input type="file" id="files" multiple accept=".m4a" onchange="updateList()"><br><br>
 
-  <p id="selectedCount">Επιλεγμένα αρχεία: 0</p>
-
   <select id="fileList" multiple></select><br>
   <button onclick="removeSelected()" id="removeBtn">Αφαίρεση επιλεγμένου</button><br><br>
 
@@ -68,7 +66,6 @@ function refreshList() {
         opt.text = f.name;
         list.appendChild(opt);
     });
-    document.getElementById("selectedCount").innerText = "Επιλεγμένα αρχεία: " + selectedFiles.length;
 }
 
 function removeSelected() {
@@ -113,9 +110,11 @@ function pollProgress() {
                 document.getElementById("removeBtn").disabled = false;
                 document.getElementById("files").disabled = false;
 
-                // Καθαρισμός λίστας και ένδειξης
+                // Καθαρισμός λίστας
                 selectedFiles = [];
                 refreshList();
+
+                // Reset progress bar
                 document.getElementById("bar").style.width = "0%";
                 document.getElementById("bar").innerText = "0%";
             }
