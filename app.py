@@ -2,12 +2,15 @@ from flask import Flask, render_template_string, request, send_from_directory, j
 import os
 import subprocess
 import uuid
+import threading
+import re
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "output_mp3"
-FFMPEG_PATH = "ffmpeg"  # Σε Windows βάλτε πλήρη διαδρομή π.χ. r"C:\ffmpeg\bin\ffmpeg.exe"
+FFMPEG_PATH = "ffmpeg"  # Σε Windows: r"C:\\ffmpeg\\bin\\ffmpeg.exe"
+FFPROBE_PATH = "ffprobe"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -28,27 +31,13 @@ select { width:100%; height:120px; margin-top:10px }
 .progress-bar { width:100%; background:#ddd; border-radius:10px; overflow:hidden; margin-top:10px }
 .progress-bar-fill { height:25px; width:0%; background:#4CAF50; text-align:center; color:white; }
 
-.file-input-wrapper {
-    position: relative;
-    overflow: hidden;
-    display: inline-block;
-}
-
+.file-input-wrapper { position: relative; overflow: hidden; display: inline-block; }
 .file-input-wrapper button {
-    border: 1px solid #ccc;
-    color: white;
-    background-color: #4CAF50;
-    padding: 10px 20px;
-    border-radius: 5px;
-    cursor: pointer;
+    background-color: #4CAF50; color: white;
+    padding: 10px 20px; border-radius: 5px; cursor: pointer;
 }
-
 .file-input-wrapper input[type=file] {
-    font-size: 100px;
-    position: absolute;
-    left: 0;
-    top: 0;
-    opacity: 0;
+    font-size: 100px; position: absolute; left: 0; top: 0; opacity: 0;
 }
 </style>
 </head>
@@ -127,22 +116,16 @@ function pollProgress() {
             document.getElementById("bar").innerText = p + "%";
 
             if (p < 100) {
-                setTimeout(pollProgress, 1000);
+                setTimeout(pollProgress, 300);
             } else {
                 document.getElementById("results").innerHTML = data.links;
 
-                // Επαναενεργοποίηση κουμπιών
                 document.getElementById("convertBtn").disabled = false;
                 document.getElementById("removeBtn").disabled = false;
                 document.getElementById("files").disabled = false;
 
-                // Καθαρισμός λίστας
                 selectedFiles = [];
                 refreshList();
-
-                // Reset progress bar
-                document.getElementById("bar").style.width = "0%";
-                document.getElementById("bar").innerText = "0%";
             }
         });
 }
@@ -152,39 +135,71 @@ function pollProgress() {
 </html>
 """
 
+def get_duration(path):
+    cmd = [
+        FFPROBE_PATH, "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        path
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return float(result.stdout.strip())
+
+def convert_files(files, task_id):
+    total_files = len(files)
+    links_html = ""
+
+    for index, file in enumerate(files):
+        input_path = os.path.join(UPLOAD_FOLDER, file.filename)
+        output_name = os.path.splitext(file.filename)[0] + ".mp3"
+        output_path = os.path.join(OUTPUT_FOLDER, output_name)
+
+        file.save(input_path)
+
+        duration = get_duration(input_path)
+
+        command = [
+            FFMPEG_PATH, "-y",
+            "-i", input_path,
+            "-codec:a", "libmp3lame",
+            "-qscale:a", "2",
+            output_path
+        ]
+
+        process = subprocess.Popen(command, stderr=subprocess.PIPE, text=True)
+
+        time_pattern = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
+
+        while True:
+            line = process.stderr.readline()
+            if not line:
+                break
+
+            match = time_pattern.search(line)
+            if match:
+                h, m, s = match.groups()
+                current_time = int(h)*3600 + int(m)*60 + float(s)
+                percent_file = min(current_time / duration, 1.0)
+
+                overall = int(((index + percent_file) / total_files) * 100)
+                progress_data[task_id] = overall
+
+        process.wait()
+
+        links_html += f'<p><a href="/download/{output_name}">{output_name}</a></p>'
+
+    progress_data[task_id] = 100
+    progress_data[task_id + "_links"] = links_html
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
         files = request.files.getlist("files")
-        task_id = request.form.get("taskId")
+        task_id = request.form.get("taskId") or str(uuid.uuid4())
 
-        total = len(files)
         progress_data[task_id] = 0
-        links = ""
 
-        for i, file in enumerate(files):
-            input_path = os.path.join(UPLOAD_FOLDER, file.filename)
-            output_name = os.path.splitext(file.filename)[0] + ".mp3"
-            output_path = os.path.join(OUTPUT_FOLDER, output_name)
-
-            file.save(input_path)
-
-            command = [
-                FFMPEG_PATH, "-y",
-                "-i", input_path,
-                "-codec:a", "libmp3lame",
-                "-qscale:a", "2",
-                output_path
-            ]
-            subprocess.run(command)
-
-            percent = int(((i + 1) / total) * 100)
-            progress_data[task_id] = percent
-
-            links += f'<p><a href="/download/{output_name}">{output_name}</a></p>'
-
-        progress_data[task_id] = 100
-        progress_data[task_id + "_links"] = links
+        threading.Thread(target=convert_files, args=(files, task_id)).start()
 
     return render_template_string(HTML)
 
