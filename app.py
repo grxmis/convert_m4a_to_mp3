@@ -1,15 +1,19 @@
 from flask import Flask, render_template_string, request, send_from_directory, jsonify
 import os
 import subprocess
+import zipfile
+import uuid
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "output_mp3"
-FFMPEG_PATH = "ffmpeg"   # ή π.χ. r"C:\\ffmpeg\\bin\\ffmpeg.exe"
+ZIP_FOLDER = "zips"
+FFMPEG_PATH = "ffmpeg"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+os.makedirs(ZIP_FOLDER, exist_ok=True)
 
 progress_data = {}
 
@@ -20,51 +24,21 @@ HTML = """
   <meta charset="utf-8">
   <title>M4A → MP3 Converter</title>
   <style>
-    body {
-      font-family: Arial;
-      background: #f2f2f2;
-      padding: 30px;
-    }
-    .box {
-      background: white;
-      padding: 20px;
-      max-width: 600px;
-      margin: auto;
-      border-radius: 10px;
-      text-align: center;
-    }
-    #fileInput {
-      display: none;
-    }
+    body { font-family: Arial; background:#f2f2f2; padding:30px }
+    .box { background:white; padding:20px; max-width:600px; margin:auto; border-radius:10px; text-align:center }
+    #fileInput { display:none }
     .green-btn {
-      background: #2ecc71;
-      color: white;
-      border: none;
-      padding: 12px 25px;
-      font-size: 16px;
-      border-radius: 6px;
-      cursor: pointer;
+      background:#2ecc71;
+      color:white;
+      border:none;
+      padding:12px 25px;
+      font-size:16px;
+      border-radius:6px;
+      cursor:pointer;
     }
-    .green-btn:hover {
-      background: #27ae60;
-    }
-    select {
-      width: 100%;
-      height: 150px;
-      margin-top: 15px;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 16px;
-      margin-top: 10px;
-      cursor: pointer;
-    }
-    #wait {
-      margin-top: 15px;
-      font-weight: bold;
-      color: #333;
-      display: none;
-    }
+    select { width:100%; height:150px; margin-top:15px }
+    button { padding:10px 20px; font-size:16px; margin-top:10px; cursor:pointer }
+    #wait { margin-top:15px; font-weight:bold; display:none }
   </style>
 </head>
 <body>
@@ -74,9 +48,7 @@ HTML = """
 
   <input type="file" id="fileInput" multiple accept=".m4a" onchange="updateFileList()">
 
-  <button class="green-btn" onclick="document.getElementById('fileInput').click()">
-    Επιλογή αρχείων
-  </button>
+  <button class="green-btn" onclick="document.getElementById('fileInput').click()">Επιλογή αρχείων</button>
 
   <select id="fileList" multiple></select>
 
@@ -89,6 +61,7 @@ HTML = """
   <div id="wait">Παρακαλώ περιμένετε όσο γίνεται η μετατροπή..</div>
 
   <div id="results"></div>
+  <div id="downloadAll"></div>
 </div>
 
 <script>
@@ -111,7 +84,6 @@ function updateFileList() {
     list.appendChild(opt);
   });
 
-  // καθαρίζει το input
   input.value = "";
 }
 
@@ -140,6 +112,7 @@ function startUpload() {
 
   document.getElementById("wait").style.display = "block";
   document.getElementById("results").innerHTML = "";
+  document.getElementById("downloadAll").innerHTML = "";
   document.getElementById("convertBtn").disabled = true;
 
   taskId = crypto.randomUUID();
@@ -151,7 +124,6 @@ function startUpload() {
   }
 
   fetch("/", { method: "POST", body: formData });
-
   pollStatus();
 }
 
@@ -167,6 +139,11 @@ function pollStatus() {
         selectedFiles = [];
         document.getElementById("fileList").innerHTML = "";
         document.getElementById("results").innerHTML = data.links;
+
+        if (data.zip) {
+          document.getElementById("downloadAll").innerHTML =
+            '<br><a href="/download_zip/' + data.zip + '"><button class="green-btn">Λήψη όλων (ZIP)</button></a>';
+        }
       }
     });
 }
@@ -185,6 +162,7 @@ def index():
         total = len(files)
         progress_data[task_id] = 0
         links = ""
+        created_files = []
 
         for i, file in enumerate(files):
             input_path = os.path.join(UPLOAD_FOLDER, file.filename)
@@ -194,34 +172,51 @@ def index():
 
             file.save(input_path)
 
-            command = [
+            cmd = [
                 FFMPEG_PATH, "-y",
                 "-i", input_path,
                 "-codec:a", "libmp3lame",
                 "-qscale:a", "2",
                 output_path
             ]
-            subprocess.run(command)
+            subprocess.run(cmd)
+
+            created_files.append(output_name)
 
             percent = int(((i + 1) / total) * 100)
             progress_data[task_id] = percent
 
             links += f'<p><a href="/download/{output_name}">{output_name}</a></p>'
 
+        # Δημιουργία ZIP
+        zip_name = f"{task_id}.zip"
+        zip_path = os.path.join(ZIP_FOLDER, zip_name)
+
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            for f in created_files:
+                zipf.write(os.path.join(OUTPUT_FOLDER, f), f)
+
         progress_data[task_id] = 100
         progress_data[task_id + "_links"] = links
+        progress_data[task_id + "_zip"] = zip_name
 
     return render_template_string(HTML)
 
 @app.route("/progress/<task_id>")
 def progress(task_id):
-    p = progress_data.get(task_id, 0)
-    links = progress_data.get(task_id + "_links", "")
-    return jsonify({"progress": p, "links": links})
+    return jsonify({
+        "progress": progress_data.get(task_id, 0),
+        "links": progress_data.get(task_id + "_links", ""),
+        "zip": progress_data.get(task_id + "_zip", "")
+    })
 
 @app.route("/download/<filename>")
 def download(filename):
     return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True)
+
+@app.route("/download_zip/<filename>")
+def download_zip(filename):
+    return send_from_directory(ZIP_FOLDER, filename, as_attachment=True)
 
 if __name__ == "__main__":
     app.run(debug=True)
