@@ -6,7 +6,7 @@ app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "output_mp3"
-FFMPEG_PATH = "ffmpeg"
+FFMPEG_PATH = "ffmpeg"   # ή π.χ. r"C:\\ffmpeg\\bin\\ffmpeg.exe"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -20,18 +20,51 @@ HTML = """
   <meta charset="utf-8">
   <title>M4A → MP3 Converter</title>
   <style>
-    body { font-family: Arial; background:#f2f2f2; padding:30px }
-    .box { background:white; padding:20px; max-width:600px; margin:auto; border-radius:10px; text-align:center }
-    #fileInput { display:none }
-    .green-btn {
-      background:#2ecc71; color:white; border:none;
-      padding:10px 20px; font-size:16px; border-radius:6px;
-      cursor:pointer;
+    body {
+      font-family: Arial;
+      background: #f2f2f2;
+      padding: 30px;
     }
-    .green-btn:hover { background:#27ae60 }
-    button { padding:10px 20px; font-size:16px; cursor:pointer; margin-top:10px }
-    select { width:100%; height:150px; margin-top:10px; }
-    #wait { margin-top:15px; font-weight:bold; color:#333; display:none }
+    .box {
+      background: white;
+      padding: 20px;
+      max-width: 600px;
+      margin: auto;
+      border-radius: 10px;
+      text-align: center;
+    }
+    #fileInput {
+      display: none;
+    }
+    .green-btn {
+      background: #2ecc71;
+      color: white;
+      border: none;
+      padding: 12px 25px;
+      font-size: 16px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .green-btn:hover {
+      background: #27ae60;
+    }
+    select {
+      width: 100%;
+      height: 150px;
+      margin-top: 15px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+    #wait {
+      margin-top: 15px;
+      font-weight: bold;
+      color: #333;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -63,8 +96,8 @@ let selectedFiles = [];
 let taskId = "";
 
 function updateFileList() {
-  const input = document.getElementById("fileInput");
-  const list = document.getElementById("fileList");
+  let input = document.getElementById("fileInput");
+  let list = document.getElementById("fileList");
 
   for (let file of input.files) {
     selectedFiles.push(file);
@@ -78,12 +111,14 @@ function updateFileList() {
     list.appendChild(opt);
   });
 
+  // καθαρίζει το input
   input.value = "";
 }
 
 function removeSelected() {
-  const list = document.getElementById("fileList");
-  const index = list.selectedIndex;
+  let list = document.getElementById("fileList");
+  let index = list.selectedIndex;
+
   if (index > -1) {
     selectedFiles.splice(index, 1);
 
@@ -99,7 +134,7 @@ function removeSelected() {
 
 function startUpload() {
   if (selectedFiles.length === 0) {
-    alert("Επίλεξε αρχεία");
+    alert("Επίλεξε αρχεία!");
     return;
   }
 
