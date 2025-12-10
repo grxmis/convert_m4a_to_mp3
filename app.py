@@ -1,15 +1,15 @@
 from flask import Flask, render_template_string, request, send_from_directory, jsonify
 import os
 import subprocess
-import zipfile
 import uuid
+import zipfile
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "output_mp3"
 ZIP_FOLDER = "zips"
-FFMPEG_PATH = "ffmpeg"
+FFMPEG_PATH = "ffmpeg"  # Σε Windows, βάλτε πλήρη διαδρομή π.χ. r"C:\ffmpeg\bin\ffmpeg.exe"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -21,131 +21,104 @@ HTML = """
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>M4A → MP3 Converter</title>
-  <style>
-    body { font-family: Arial; background:#f2f2f2; padding:30px }
-    .box { background:white; padding:20px; max-width:600px; margin:auto; border-radius:10px; text-align:center }
-    #fileInput { display:none }
-    .green-btn {
-      background:#2ecc71;
-      color:white;
-      border:none;
-      padding:12px 25px;
-      font-size:16px;
-      border-radius:6px;
-      cursor:pointer;
-    }
-    select { width:100%; height:150px; margin-top:15px }
-    button { padding:10px 20px; font-size:16px; margin-top:10px; cursor:pointer }
-    #wait { margin-top:15px; font-weight:bold; display:none }
-  </style>
+<meta charset="utf-8">
+<title>M4A → MP3 Converter</title>
+<style>
+body { font-family: Arial; background:#f2f2f2; padding:30px }
+.box { background:white; padding:20px; max-width:600px; margin:auto; border-radius:10px }
+button { padding:10px 20px; font-size:16px; margin-top:5px; cursor:pointer; }
+select { width:100%; height:120px; margin-top:10px }
+.green-btn { background-color:#4CAF50; color:white; border:none; border-radius:5px; cursor:pointer; }
+#waitMsg { margin-top:10px; font-weight:bold; color:blue; display:none; }
+</style>
 </head>
 <body>
 
 <div class="box">
   <h2>M4A → MP3 Converter</h2>
 
-  <input type="file" id="fileInput" multiple accept=".m4a" onchange="updateFileList()">
+  <div>
+      <label class="green-btn">
+          Επιλογή Αρχείων
+          <input type="file" id="files" multiple accept=".m4a" style="display:none" onchange="updateList()">
+      </label>
+  </div><br>
 
-  <button class="green-btn" onclick="document.getElementById('fileInput').click()">Επιλογή αρχείων</button>
+  <select id="fileList" multiple></select><br>
+  <button onclick="removeSelected()" id="removeBtn">Αφαίρεση επιλεγμένου</button><br><br>
 
-  <select id="fileList" multiple></select>
+  <button onclick="startUpload()" id="convertBtn">Μετατροπή</button>
+  <div id="waitMsg">Παρακαλώ περιμένετε όσο γίνεται η μετατροπή...</div>
 
-  <br>
-  <button onclick="removeSelected()">Αφαίρεση επιλεγμένου</button>
-
-  <br>
-  <button id="convertBtn" onclick="startUpload()">Μετατροπή</button>
-
-  <div id="wait">Παρακαλώ περιμένετε όσο γίνεται η μετατροπή..</div>
-
-  <div id="results"></div>
-  <div id="downloadAll"></div>
+  <div id="zipbox"></div>
 </div>
 
 <script>
 let selectedFiles = [];
 let taskId = "";
 
-function updateFileList() {
-  let input = document.getElementById("fileInput");
-  let list = document.getElementById("fileList");
+function updateList() {
+    selectedFiles = Array.from(document.getElementById("files").files);
+    refreshList();
+}
 
-  for (let file of input.files) {
-    selectedFiles.push(file);
-  }
-
-  list.innerHTML = "";
-  selectedFiles.forEach((file, index) => {
-    let opt = document.createElement("option");
-    opt.value = index;
-    opt.text = file.name;
-    list.appendChild(opt);
-  });
-
-  input.value = "";
+function refreshList() {
+    let list = document.getElementById("fileList");
+    list.innerHTML = "";
+    selectedFiles.forEach((f, i) => {
+        let opt = document.createElement("option");
+        opt.value = i;
+        opt.text = f.name;
+        list.appendChild(opt);
+    });
 }
 
 function removeSelected() {
-  let list = document.getElementById("fileList");
-  let index = list.selectedIndex;
-
-  if (index > -1) {
-    selectedFiles.splice(index, 1);
-
-    list.innerHTML = "";
-    selectedFiles.forEach((file, i) => {
-      let opt = document.createElement("option");
-      opt.value = i;
-      opt.text = file.name;
-      list.appendChild(opt);
-    });
-  }
+    let list = document.getElementById("fileList");
+    let indexes = Array.from(list.selectedOptions).map(o => parseInt(o.value));
+    selectedFiles = selectedFiles.filter((_, i) => !indexes.includes(i));
+    refreshList();
 }
 
 function startUpload() {
-  if (selectedFiles.length === 0) {
-    alert("Επίλεξε αρχεία!");
-    return;
-  }
+    if (selectedFiles.length === 0) { alert("Επίλεξε αρχεία"); return; }
 
-  document.getElementById("wait").style.display = "block";
-  document.getElementById("results").innerHTML = "";
-  document.getElementById("downloadAll").innerHTML = "";
-  document.getElementById("convertBtn").disabled = true;
+    document.getElementById("convertBtn").disabled = true;
+    document.getElementById("removeBtn").disabled = true;
+    document.getElementById("files").disabled = true;
+    document.getElementById("waitMsg").style.display = "block";
+    document.getElementById("zipbox").innerHTML = "";
 
-  taskId = crypto.randomUUID();
-  let formData = new FormData();
-  formData.append("taskId", taskId);
+    taskId = crypto.randomUUID();
+    let formData = new FormData();
+    formData.append("taskId", taskId);
 
-  for (let f of selectedFiles) {
-    formData.append("files", f);
-  }
+    for (let f of selectedFiles) formData.append("files", f);
 
-  fetch("/", { method: "POST", body: formData });
-  pollStatus();
+    fetch("/", { method: "POST", body: formData });
+    pollProgress();
 }
 
-function pollStatus() {
-  fetch("/progress/" + taskId)
-    .then(r => r.json())
-    .then(data => {
-      if (data.progress < 100) {
-        setTimeout(pollStatus, 1000);
-      } else {
-        document.getElementById("wait").style.display = "none";
-        document.getElementById("convertBtn").disabled = false;
-        selectedFiles = [];
-        document.getElementById("fileList").innerHTML = "";
-        document.getElementById("results").innerHTML = data.links;
+function pollProgress() {
+    fetch("/progress/" + taskId)
+        .then(r => r.json())
+        .then(data => {
+            if (data.progress < 100) {
+                setTimeout(pollProgress, 1000);
+            } else {
+                document.getElementById("waitMsg").style.display = "none";
+                document.getElementById("zipbox").innerHTML =
+                    '<a href="/download_zip/' + data.zip + '">' +
+                    '<button class="green-btn">Λήψη όλων σε ZIP</button></a>';
 
-        if (data.zip) {
-          document.getElementById("downloadAll").innerHTML =
-            '<br><a href="/download_zip/' + data.zip + '"><button class="green-btn">Λήψη όλων (ZIP)</button></a>';
-        }
-      }
-    });
+                document.getElementById("convertBtn").disabled = false;
+                document.getElementById("removeBtn").disabled = false;
+                document.getElementById("files").disabled = false;
+
+                selectedFiles = [];
+                refreshList();
+            }
+        });
 }
 </script>
 
@@ -158,61 +131,43 @@ def index():
     if request.method == "POST":
         files = request.files.getlist("files")
         task_id = request.form.get("taskId")
-
-        total = len(files)
         progress_data[task_id] = 0
-        links = ""
-        created_files = []
+        mp3_files = []
 
-        for i, file in enumerate(files):
+        for file in files:
             input_path = os.path.join(UPLOAD_FOLDER, file.filename)
-            base_name = os.path.splitext(file.filename)[0]
-            output_name = base_name + ".mp3"
+            output_name = os.path.splitext(file.filename)[0] + ".mp3"
             output_path = os.path.join(OUTPUT_FOLDER, output_name)
 
             file.save(input_path)
 
-            cmd = [
+            command = [
                 FFMPEG_PATH, "-y",
                 "-i", input_path,
                 "-codec:a", "libmp3lame",
                 "-qscale:a", "2",
                 output_path
             ]
-            subprocess.run(cmd)
-
-            created_files.append(output_name)
-
-            percent = int(((i + 1) / total) * 100)
-            progress_data[task_id] = percent
-
-            links += f'<p><a href="/download/{output_name}">{output_name}</a></p>'
+            subprocess.run(command)
+            mp3_files.append(output_path)
 
         # Δημιουργία ZIP
         zip_name = f"{task_id}.zip"
         zip_path = os.path.join(ZIP_FOLDER, zip_name)
-
         with zipfile.ZipFile(zip_path, 'w') as zipf:
-            for f in created_files:
-                zipf.write(os.path.join(OUTPUT_FOLDER, f), f)
+            for mp3 in mp3_files:
+                zipf.write(mp3, os.path.basename(mp3))
 
         progress_data[task_id] = 100
-        progress_data[task_id + "_links"] = links
         progress_data[task_id + "_zip"] = zip_name
 
     return render_template_string(HTML)
 
 @app.route("/progress/<task_id>")
 def progress(task_id):
-    return jsonify({
-        "progress": progress_data.get(task_id, 0),
-        "links": progress_data.get(task_id + "_links", ""),
-        "zip": progress_data.get(task_id + "_zip", "")
-    })
-
-@app.route("/download/<filename>")
-def download(filename):
-    return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True)
+    p = progress_data.get(task_id, 0)
+    zip_name = progress_data.get(task_id + "_zip", "")
+    return jsonify({"progress": p, "zip": zip_name})
 
 @app.route("/download_zip/<filename>")
 def download_zip(filename):
