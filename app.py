@@ -22,7 +22,15 @@ HTML = """
   <style>
     body { font-family: Arial; background:#f2f2f2; padding:30px }
     .box { background:white; padding:20px; max-width:600px; margin:auto; border-radius:10px; text-align:center }
-    button { padding:10px 20px; font-size:16px; cursor:pointer }
+    #fileInput { display:none }
+    .green-btn {
+      background:#2ecc71; color:white; border:none;
+      padding:10px 20px; font-size:16px; border-radius:6px;
+      cursor:pointer;
+    }
+    .green-btn:hover { background:#27ae60 }
+    button { padding:10px 20px; font-size:16px; cursor:pointer; margin-top:10px }
+    select { width:100%; height:150px; margin-top:10px; }
     #wait { margin-top:15px; font-weight:bold; color:#333; display:none }
   </style>
 </head>
@@ -31,7 +39,18 @@ HTML = """
 <div class="box">
   <h2>M4A → MP3 Converter</h2>
 
-  <input type="file" id="files" multiple accept=".m4a"><br><br>
+  <input type="file" id="fileInput" multiple accept=".m4a" onchange="updateFileList()">
+
+  <button class="green-btn" onclick="document.getElementById('fileInput').click()">
+    Επιλογή αρχείων
+  </button>
+
+  <select id="fileList" multiple></select>
+
+  <br>
+  <button onclick="removeSelected()">Αφαίρεση επιλεγμένου</button>
+
+  <br>
   <button id="convertBtn" onclick="startUpload()">Μετατροπή</button>
 
   <div id="wait">Παρακαλώ περιμένετε όσο γίνεται η μετατροπή..</div>
@@ -40,11 +59,46 @@ HTML = """
 </div>
 
 <script>
+let selectedFiles = [];
 let taskId = "";
 
+function updateFileList() {
+  const input = document.getElementById("fileInput");
+  const list = document.getElementById("fileList");
+
+  for (let file of input.files) {
+    selectedFiles.push(file);
+  }
+
+  list.innerHTML = "";
+  selectedFiles.forEach((file, index) => {
+    let opt = document.createElement("option");
+    opt.value = index;
+    opt.text = file.name;
+    list.appendChild(opt);
+  });
+
+  input.value = "";
+}
+
+function removeSelected() {
+  const list = document.getElementById("fileList");
+  const index = list.selectedIndex;
+  if (index > -1) {
+    selectedFiles.splice(index, 1);
+
+    list.innerHTML = "";
+    selectedFiles.forEach((file, i) => {
+      let opt = document.createElement("option");
+      opt.value = i;
+      opt.text = file.name;
+      list.appendChild(opt);
+    });
+  }
+}
+
 function startUpload() {
-  let files = document.getElementById("files").files;
-  if (files.length === 0) {
+  if (selectedFiles.length === 0) {
     alert("Επίλεξε αρχεία");
     return;
   }
@@ -57,7 +111,9 @@ function startUpload() {
   let formData = new FormData();
   formData.append("taskId", taskId);
 
-  for (let f of files) formData.append("files", f);
+  for (let f of selectedFiles) {
+    formData.append("files", f);
+  }
 
   fetch("/", { method: "POST", body: formData });
 
@@ -73,6 +129,8 @@ function pollStatus() {
       } else {
         document.getElementById("wait").style.display = "none";
         document.getElementById("convertBtn").disabled = false;
+        selectedFiles = [];
+        document.getElementById("fileList").innerHTML = "";
         document.getElementById("results").innerHTML = data.links;
       }
     });
