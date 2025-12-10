@@ -1,7 +1,6 @@
 from flask import Flask, render_template_string, request, send_from_directory, jsonify
 import os
 import subprocess
-import uuid
 
 app = Flask(__name__)
 
@@ -22,10 +21,9 @@ HTML = """
   <title>M4A → MP3 Converter</title>
   <style>
     body { font-family: Arial; background:#f2f2f2; padding:30px }
-    .box { background:white; padding:20px; max-width:600px; margin:auto; border-radius:10px }
-    button { padding:10px 20px; font-size:16px }
-    .progress-bar { width:100%; background:#ddd; border-radius:10px; overflow:hidden; margin-top:10px }
-    .progress-bar-fill { height:25px; width:0%; background:#4CAF50; text-align:center; color:white; }
+    .box { background:white; padding:20px; max-width:600px; margin:auto; border-radius:10px; text-align:center }
+    button { padding:10px 20px; font-size:16px; cursor:pointer }
+    #wait { margin-top:15px; font-weight:bold; color:#333; display:none }
   </style>
 </head>
 <body>
@@ -34,11 +32,9 @@ HTML = """
   <h2>M4A → MP3 Converter</h2>
 
   <input type="file" id="files" multiple accept=".m4a"><br><br>
-  <button onclick="startUpload()">Μετατροπή</button>
+  <button id="convertBtn" onclick="startUpload()">Μετατροπή</button>
 
-  <div class="progress-bar">
-    <div class="progress-bar-fill" id="bar">0%</div>
-  </div>
+  <div id="wait">Παρακαλώ περιμένετε όσο γίνεται η μετατροπή..</div>
 
   <div id="results"></div>
 </div>
@@ -48,7 +44,14 @@ let taskId = "";
 
 function startUpload() {
   let files = document.getElementById("files").files;
-  if (files.length === 0) { alert("Επίλεξε αρχεία"); return; }
+  if (files.length === 0) {
+    alert("Επίλεξε αρχεία");
+    return;
+  }
+
+  document.getElementById("wait").style.display = "block";
+  document.getElementById("results").innerHTML = "";
+  document.getElementById("convertBtn").disabled = true;
 
   taskId = crypto.randomUUID();
   let formData = new FormData();
@@ -57,20 +60,19 @@ function startUpload() {
   for (let f of files) formData.append("files", f);
 
   fetch("/", { method: "POST", body: formData });
-  pollProgress();
+
+  pollStatus();
 }
 
-function pollProgress() {
+function pollStatus() {
   fetch("/progress/" + taskId)
     .then(r => r.json())
     .then(data => {
-      let p = data.progress;
-      document.getElementById("bar").style.width = p + "%";
-      document.getElementById("bar").innerText = p + "%";
-
-      if (p < 100) {
-        setTimeout(pollProgress, 1000);
+      if (data.progress < 100) {
+        setTimeout(pollStatus, 1000);
       } else {
+        document.getElementById("wait").style.display = "none";
+        document.getElementById("convertBtn").disabled = false;
         document.getElementById("results").innerHTML = data.links;
       }
     });
@@ -93,7 +95,8 @@ def index():
 
         for i, file in enumerate(files):
             input_path = os.path.join(UPLOAD_FOLDER, file.filename)
-            output_name = os.path.splitext(file.filename)[0] + ".mp3"
+            base_name = os.path.splitext(file.filename)[0]
+            output_name = base_name + ".mp3"
             output_path = os.path.join(OUTPUT_FOLDER, output_name)
 
             file.save(input_path)
@@ -125,5 +128,7 @@ def progress(task_id):
 
 @app.route("/download/<filename>")
 def download(filename):
-    return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True) 
-    
+    return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True)
+
+if __name__ == "__main__":
+    app.run(debug=True)
